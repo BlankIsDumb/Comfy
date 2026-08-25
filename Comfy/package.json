@@ -9,15 +9,12 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/Comfy-Themes/Spicetify.git"
+		"url": "git+https://github.com/BlankIsDumb/Comfy.git"
 	},
 	"keywords": ["comfy", "spicetify"],
 	"author": "Comfy-Themes",
 	"license": "WTFPL",
-	"bugs": {
-		"url": "https://github.com/Comfy-Themes/Spicetify/issues"
-	},
-	"homepage": "https://github.com/Comfy-Themes/Spicetify#readme",
+	"homepage": "https://github.com/BlankIsDumb/Comfy#readme",
 	"dependencies": {
 		"node-sass": "^7.0.3"
 	}
