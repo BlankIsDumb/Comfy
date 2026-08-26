@@ -8,8 +8,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
 
@@ -18,7 +18,7 @@ jobs:
 
       - name: Push Changes
         uses: stefanzweifel/git-auto-commit-action@v4
-        if: ${{ github.repository == 'Comfy-Themes/Spicetify' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta') }}
+        if: ${{ github.repository == 'BlankIsDumb/Comfy' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta') }}
         with:
           commit_message: "chore: compile sass"
           commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"

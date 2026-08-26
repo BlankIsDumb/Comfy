@@ -24,11 +24,13 @@
 This fork is installed manually so its local CSS and custom color schemes are not replaced by upstream downloads.
 
 1. Clone or download this repository.
-2. Copy the repository's inner `Comfy` folder to:
+2. Copy the repository's inner `Comfy` folder to the Spicetify themes directory:
 
-```text
-%APPDATA%\spicetify\Themes\Comfy
-```
+| Platform | Theme folder |
+| --- | --- |
+| Windows | `%APPDATA%\spicetify\Themes\Comfy` |
+| macOS | `~/.config/spicetify/Themes/Comfy` |
+| Linux | `~/.config/spicetify/Themes/Comfy` |
 
 The installed folder should directly contain `color.ini`, `user.css`, and `theme.js`.
 
@@ -47,7 +49,14 @@ spicetify config current_theme Comfy color_scheme blanky
 spicetify apply
 ```
 
-Use `Tuyu` instead of `blanky` to select the other custom scheme. Every available scheme is listed in [`Comfy/color.ini`](Comfy/color.ini); preview images for the upstream schemes are available [here](Comfy/README.md).
+Every available scheme is listed in [`Comfy/color.ini`](Comfy/color.ini); preview images (not exhaustive) are available [here](Comfy/README.md).
+
+Change schemes later with:
+
+```sh
+spicetify config color_scheme <scheme>
+spicetify apply
+```
 
 ### 🖌️ Customization
 

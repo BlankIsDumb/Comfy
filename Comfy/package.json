@@ -2,7 +2,7 @@
 	"name": "comfy",
 	"version": "1.0.0",
 	"description": "Stay comfy while listening to music",
-	"main": "theme.script.js",
+	"main": "theme.js",
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1",
 		"compile-scss": "sass app.scss app.css"
@@ -12,7 +12,7 @@
 		"url": "git+https://github.com/BlankIsDumb/Comfy.git"
 	},
 	"keywords": ["comfy", "spicetify"],
-	"author": "Comfy-Themes",
+	"author": "BlankIsDumb",
 	"license": "WTFPL",
 	"homepage": "https://github.com/BlankIsDumb/Comfy#readme",
 	"dependencies": {

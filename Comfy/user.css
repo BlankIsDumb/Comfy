@@ -4,8 +4,7 @@
 
 :root .global-nav .Root__main-view .main-view-container .main-entityHeader-container {
     padding: 32px;
-    align-items: center;
-    margin-top: 64px
+    align-items: center
 }
 
 :root #main.Banner-Enabled .comfy-banner-frame {
@@ -1442,8 +1441,8 @@
     opacity: var(--top-bar-opacity) !important
 }
 
-:root #main.AM-Gradient-Include-Existing-Snippet.Banner-Enabled .under-main-view>div:not(.comfy-banner-frame),
-:root #main.Replace-Existing-Banners.Banner-Enabled .under-main-view>div:not(.comfy-banner-frame) {
+:root #main.AM-Gradient-Include-Existing-Snippet.Banner-Enabled .before-scroll-node>div:not(.comfy-banner-frame),
+:root #main.Replace-Existing-Banners.Banner-Enabled .before-scroll-node>div:not(.comfy-banner-frame) {
     display: none !important
 }
 
