@@ -11,20 +11,16 @@
       <hr>
       <h4>✅ Current support / tested versions</h4>
         <li>🔥 Spicetify: <code><a href="https://github.com/spicetify/cli/releases/tag/v2.44.0">2.44.0</a></code></li>
-        <li>🟢 Spotify: <code>1.2.99.317</code> on macOS</li>
-        <li>Also tested: Spotify <code>1.2.98.301.gfcaeba72</code></li>
+        <li>🟢 Spotify: <code>1.2.99.317</code></li>
+        <li>Also tested: Spotify <code>1.2.98.301.gfcaeba72</code> and <code>1.2.55</code></li>
       <hr>
     </td>
   </tr>
 </table>
 
-Current support targets the macOS versions above. The broader navigation and settings checks ran on 1.2.98; 1.2.99 received runtime, layout, settings and sidebar checks plus user testing. Windows and Linux installation paths are provided below, but this update was not tested on those platforms. See [the compatibility report](COMPATIBILITY.md) for test coverage and known upstream errors.
-
 ### 📥 Manual Installation
 
 ---
-
-This fork is installed manually so its local CSS and custom color schemes are not replaced by upstream downloads.
 
 1. Clone or download this repository.
 2. Copy the repository's inner `Comfy` folder to the Spicetify themes directory. Locations vary by installation:
@@ -46,13 +42,6 @@ spicetify config inject_css 1 replace_colors 1 overwrite_assets 1 inject_theme_j
 spicetify apply
 ```
 
-For example:
-
-```powershell
-spicetify config current_theme Comfy color_scheme blanky
-spicetify apply
-```
-
 Every available scheme is listed in [`Comfy/color.ini`](Comfy/color.ini); preview images (not exhaustive) are available [here](Comfy/README.md).
 
 Change schemes later with:
@@ -62,6 +51,16 @@ spicetify config color_scheme <scheme>
 spicetify apply
 ```
 
+### 🔤 Fonts — install separately
+
+Font files are not bundled or automatically downloaded. Download and install these fonts on your computer, then fully quit and reopen Spotify:
+
+| Font | Download | Used for |
+| --- | --- | --- |
+| Nunito | [Google Fonts](https://fonts.google.com/specimen/Nunito) | Main English text |
+| Zen Kaku Gothic Antique — Medium (500) | [Google Fonts](https://fonts.google.com/specimen/Zen+Kaku+Gothic+Antique) | Japanese text, use `Zen Kaku Gothic Antique Medium` |
+| SOV_monomon (โมโนมน) | [f0nt.com](https://www.f0nt.com/release/sov_monomon/) | Thai text |
+
 ### 🖌️ Customization
 
 ---
@@ -69,18 +68,6 @@ spicetify apply
 - `color.ini` controls color schemes.
 - `user.css` contains the bundled theme styling and local font override.
 - `theme.js` controls theme settings and behavior.
-
-### 🔤 Fonts — install separately
-
-The original theme fetched fonts automatically. This fork uses locally installed fonts instead: font files are not bundled or automatically downloaded. Download and install these fonts on your computer, then fully quit and reopen Spotify:
-
-| Font | Download | Used for |
-| --- | --- | --- |
-| Nunito | [Google Fonts](https://fonts.google.com/specimen/Nunito) | Main Latin text |
-| Zen Kaku Gothic Antique — Medium (500) | [Google Fonts](https://fonts.google.com/specimen/Zen+Kaku+Gothic+Antique) | Japanese text; the font stack requests `Zen Kaku Gothic Antique Medium` |
-| SOV_monomon (โมโนมน) | [f0nt.com](https://www.f0nt.com/release/sov_monomon/) | Thai text |
-
-On macOS, open the downloaded font files in Font Book and install them. If a font is missing, Spotify falls back to the next available font, so the theme still works but the typography will differ. The default stack is defined in `Comfy/local.css`; the Custom Font setting can override it.
 
 ### Development
 
