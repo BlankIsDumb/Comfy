@@ -124,40 +124,163 @@
 	});
 
 	let bannerRevision = 0;
+	let bannerWatchRevision = 0;
+	let bannerObserver;
+	let bannerWatchTimeout;
+	let bannerSyncFrame;
 	let lastHeaderImage;
 	let lastHeaderBackground;
-	function readHeaderImages() {
-		// Spotify also assigns this class to the wrapper; select the image itself.
-		const image = document.querySelector(".Root__main-view img.main-entityHeader-image, .Root__main-view .main-entityHeader-image img");
-		// New artist pages put their native background directly in the scroll slot.
-		const headers = document.querySelectorAll(".Root__main-view .main-entityHeader-background, .Root__main-view .before-scroll-node > :not(.comfy-banner-frame), .Root__main-view .before-scroll-node > :not(.comfy-banner-frame) [style]");
-		return {
-			image: image?.currentSrc || image?.src,
-			background: Array.from(headers, header => getComputedStyle(header).backgroundImage.match(/^url\(["']?(.*?)["']?\)$/)?.[1]).find(Boolean)
-		};
+	const bannerDomSelector = ".before-scroll-node, .main-entityHeader-background, .main-entityHeader-image";
+
+	function isBannerEnabled() {
+		return getConfig("Banner-Enabled") ?? true;
 	}
+
+	function isAppleMusicGradientEnabled() {
+		return Boolean(getConfig("Apple-Music-Gradient-Snippet"));
+	}
+
+	function isBannerChannel(pathname = Spicetify.Platform.History?.location?.pathname) {
+		return Boolean(pathname && Object.values(channels).some(channel => channel.enabled && channel.regex.test(pathname)));
+	}
+
+	function needsBannerSource() {
+		return isBannerEnabled() && isBannerChannel();
+	}
+
+	function needsHeaderArtwork() {
+		if (!needsBannerSource()) return false;
+		const pathname = Spicetify.Platform.History.location.pathname;
+		const prefersAlbumArtwork = Boolean(getConfig("Prefer-Existing-Image")) && /^\/album\//.test(pathname);
+		const includesNativeGradient = isAppleMusicGradientEnabled() &&
+			Boolean(getConfig("AM-Gradient-Include-Existing-Snippet")) &&
+			/^\/(?:artist|playlist)\//.test(pathname);
+		return prefersAlbumArtwork || includesNativeGradient;
+	}
+
+	function readHeaderImages() {
+		const main = document.querySelector(".Root__main-view");
+		const container = main?.querySelector(".before-scroll-node");
+		// Spotify also assigns this class to the wrapper; select the image itself.
+		const image = main?.querySelector("img.main-entityHeader-image, .main-entityHeader-image img");
+		// New artist pages put their native background directly in the scroll slot.
+		// Inspect its few direct children instead of every styled descendant.
+		const backgroundCandidates = [main?.querySelector(".main-entityHeader-background")];
+		Array.from(container?.children || []).forEach(element => {
+			if (element !== frame) backgroundCandidates.push(element);
+		});
+		backgroundCandidates.push(container?.querySelector(":scope > :not(.comfy-banner-frame) [style*='background']"));
+
+		let background;
+		for (const element of backgroundCandidates.filter(Boolean)) {
+			const value = element.style?.backgroundImage || getComputedStyle(element).backgroundImage;
+			background = value?.match(/url\(["']?(.*?)["']?\)/)?.[1];
+			if (background) break;
+		}
+		return { image: image?.currentSrc || image?.src, background };
+	}
+
 	function mountBanner() {
+		if (!isBannerEnabled()) {
+			frame.remove();
+			return;
+		}
 		const container = document.querySelector(".Root__main-view .before-scroll-node");
 		if (container && frame.parentElement !== container) container.appendChild(frame);
 	}
-	// Spotify replaces the scroll container on navigation, even after History fires.
-	waitForDeps(".Root__top-container", main => {
+
+	function stopBannerWatch() {
+		bannerObserver?.disconnect();
+		bannerObserver = undefined;
+		if (bannerWatchTimeout) clearTimeout(bannerWatchTimeout);
+		bannerWatchTimeout = undefined;
+		if (bannerSyncFrame) cancelAnimationFrame(bannerSyncFrame);
+		bannerSyncFrame = undefined;
+	}
+
+	function syncBannerDom(revision) {
+		if (revision !== bannerWatchRevision || !needsBannerSource()) return;
 		mountBanner();
-		new MutationObserver(() => {
-			mountBanner();
-			// Album/artist artwork can arrive after History. Re-resolve only when
-			// those images change, not for every playback or banner style update.
-			const header = readHeaderImages();
-			if (header.image !== lastHeaderImage || header.background !== lastHeaderBackground) {
-				lastHeaderImage = header.image;
-				lastHeaderBackground = header.background;
-				if (getConfig("Prefer-Existing-Image") || getConfig("AM-Gradient-Include-Existing-Snippet")) updateBanner();
+		if (!needsHeaderArtwork()) return;
+		const header = readHeaderImages();
+		if (header.image !== lastHeaderImage || header.background !== lastHeaderBackground) {
+			lastHeaderImage = header.image;
+			lastHeaderBackground = header.background;
+			updateBanner();
+		}
+	}
+
+	function scheduleBannerDomSync(revision) {
+		if (revision !== bannerWatchRevision || bannerSyncFrame) return;
+		bannerSyncFrame = requestAnimationFrame(() => {
+			bannerSyncFrame = undefined;
+			syncBannerDom(revision);
+		});
+	}
+
+	function mutationContainsBannerNode(node) {
+		return node.nodeType === Node.ELEMENT_NODE &&
+			!node.closest?.(".comfy-banner-frame") &&
+			(node.matches(bannerDomSelector) || node.querySelector?.(bannerDomSelector));
+	}
+
+	function mutationAffectsBanner(record) {
+		if (record.type === "childList") {
+			return Array.from(record.addedNodes).some(mutationContainsBannerNode) ||
+				Array.from(record.removedNodes).some(mutationContainsBannerNode);
+		}
+		if (!needsHeaderArtwork() || record.target.closest?.(".comfy-banner-frame")) return false;
+		if (record.attributeName === "src" || record.attributeName === "srcset") {
+			return record.target.matches("img.main-entityHeader-image, .main-entityHeader-image img");
+		}
+		return record.attributeName === "style" && Boolean(
+			record.target.closest(".main-entityHeader-background") ||
+			(record.target.closest(".before-scroll-node") &&
+				(record.target.parentElement?.matches(".before-scroll-node") || record.target.getAttribute("style")?.includes("background")))
+		);
+	}
+
+	async function startBannerWatch(revision) {
+		await waitForDeps(".Root__top-container", root => {
+			if (revision !== bannerWatchRevision || !needsBannerSource()) return;
+			bannerObserver = new MutationObserver(function comfyBannerObserver(records) {
+				if (records.some(mutationAffectsBanner)) scheduleBannerDomSync(revision);
+			});
+			const options = { childList: true, subtree: true };
+			if (needsHeaderArtwork()) {
+				options.attributes = true;
+				options.attributeFilter = ["src", "srcset", "style"];
 			}
-		}).observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "style"] });
-	}, true);
-	waitForDeps("Spicetify.Platform.History", history => history.listen(updateBanner));
-	waitForDeps("Spicetify.Player", player => player.addEventListener("songchange", updateBanner));
-	updateBanner();
+			bannerObserver.observe(root, options);
+			syncBannerDom(revision);
+			bannerWatchTimeout = setTimeout(() => {
+				if (revision === bannerWatchRevision) stopBannerWatch();
+			}, 5000);
+		}, true);
+	}
+
+	function syncBannerRuntime() {
+		const revision = ++bannerWatchRevision;
+		stopBannerWatch();
+		lastHeaderImage = undefined;
+		lastHeaderBackground = undefined;
+		if (!needsBannerSource()) {
+			++bannerRevision;
+			frame.remove();
+			frame.style.display = "none";
+			document.getElementById("main")?.classList.remove("Banner-Enabled");
+			document.documentElement.style.setProperty("--image-url", "none");
+			return;
+		}
+		updateBanner();
+		startBannerWatch(revision);
+	}
+
+	waitForDeps("Spicetify.Platform.History", history => history.listen(syncBannerRuntime));
+	waitForDeps("Spicetify.Player", player => player.addEventListener("songchange", () => {
+		if (needsBannerSource()) updateBanner();
+	}));
+	syncBannerRuntime();
 
 	// React components
 	const Dialog = Spicetify.React.memo(props => {
@@ -1382,6 +1505,7 @@
 					title: "Custom Banner Images",
 					defaultVal: true,
 					desc: "(all settings in this category will be ignored if disabled)",
+					callback: syncBannerRuntime,
 					items: Object.keys(channels).map(channel => ({
 						type: Toggle,
 						name: channel,
@@ -1410,7 +1534,7 @@
 					title: "Prefer Existing Image",
 					defaultVal: false,
 					desc: "If available, use existing images instead of the current playing song - e.g playlist image, album art, etc.",
-					callback: updateBanner
+					callback: syncBannerRuntime
 				},
 				{
 					type: SubSection,
@@ -1425,6 +1549,7 @@
 							document.documentElement.style.setProperty("--gradient-width", "");
 							document.documentElement.style.setProperty("--gradient-radius", "");
 						}
+						syncBannerRuntime();
 					},
 					tippy: Spicetify.React.createElement(
 						Spicetify.React.Fragment,
@@ -1441,7 +1566,7 @@
 							title: "Existing Banners",
 							defaultVal: false,
 							desc: "Apply the gradient to existing banners on the page (e.g. artist banners)",
-							callback: updateBanner
+							callback: syncBannerRuntime
 						},
 						{
 							type: Input,
@@ -1745,8 +1870,17 @@
 
 	async function updateBanner() {
 		const revision = ++bannerRevision;
+		if (!isBannerEnabled()) return;
 		if (!await waitForDeps("Spicetify.Platform.History.location")) return;
 		const pathname = Spicetify.Platform.History.location.pathname;
+		const validChannel = isBannerChannel(pathname);
+		if (!validChannel) {
+			frame.remove();
+			frame.style.display = "none";
+			document.getElementById("main")?.classList.remove("Banner-Enabled");
+			document.documentElement.style.setProperty("--image-url", "none");
+			return;
+		}
 		mountBanner();
 		let source;
 		try {
@@ -1762,7 +1896,7 @@
 				}
 			}
 			if (!source && getConfig("Custom-Image")) source = getConfig("Custom-Image-URL")?.trim();
-			if (!source && getConfig("Prefer-Existing-Image")) {
+			if (!source && isBannerEnabled() && getConfig("Prefer-Existing-Image")) {
 				if (isPlaylist) {
 					const playlist = await Spicetify.Platform.PlaylistAPI.getMetadata(`spotify:playlist:${pathname.split("/")[2]}`);
 					source = playlist?.images?.[0]?.url;
@@ -1777,9 +1911,8 @@
 		if (revision !== bannerRevision) return;
 		const data = Spicetify.Player?.data;
 		source = normalizeImage(source || data?.item?.metadata?.image_xlarge_url || data?.track?.metadata?.image_xlarge_url);
-		const validChannel = Object.values(channels).some(channel => channel.enabled && channel.regex.test(pathname));
-		frame.style.display = validChannel ? "" : "none";
-		document.getElementById("main")?.classList.toggle("Banner-Enabled", Boolean(getConfig("Banner-Enabled") && validChannel));
+		frame.style.display = "";
+		document.getElementById("main")?.classList.add("Banner-Enabled");
 		banner.forEach(image => { image.style.display = source ? "" : "none"; });
 		const rootStyle = document.documentElement.style;
 		if (!source) {
