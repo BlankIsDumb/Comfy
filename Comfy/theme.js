@@ -1,8 +1,8 @@
 // Comfy theme runtime. Loaded locally by Spicetify.
 (async function comfy() {
 	// Block Until Mass Usage Deps Loaded
-	if (!(Spicetify.React && Spicetify.ReactDOM && Spicetify.Config)) {
-		setTimeout(comfy, 10);
+	if (!(globalThis.Spicetify?.React && Spicetify.ReactDOM?.render && Spicetify.Config && Spicetify.Platform?.History)) {
+		setTimeout(comfy, 100);
 		return;
 	}
 	console.debug("[Comfy-Event]: Global Dependencies loaded");
@@ -20,7 +20,14 @@
 	console.debug(`[Comfy-Event]: Global Functions Added`);
 
 	// Initialize Config
-	let config = JSON.parse(localStorage.getItem("comfy:config") || "{}");
+	let config;
+	try {
+		config = JSON.parse(localStorage.getItem("comfy:config") || "{}");
+		if (!config || typeof config !== "object" || Array.isArray(config)) config = {};
+	} catch {
+		console.warn("[Comfy-Warning]: Invalid saved settings; using defaults");
+		config = {};
+	}
 	if ("Color-Scheme" in config || "Color-Schemes" in config) {
 		delete config["Color-Scheme"];
 		delete config["Color-Schemes"];
@@ -116,16 +123,40 @@
 		frame.append(image);
 	});
 
-	waitForDeps(
-		".before-scroll-node",
-		bannerContainer => {
-			console.debug("[Comfy-Event]: Banner Frame Added");
-			bannerContainer.appendChild(frame);
-		},
-		true
-	);
-	waitForDeps("Spicetify.Platform.History", () => Spicetify.Platform.History.listen(updateBanner));
-	waitForDeps("Spicetify.Player", () => Spicetify.Player.addEventListener("songchange", updateBanner));
+	let bannerRevision = 0;
+	let lastHeaderImage;
+	let lastHeaderBackground;
+	function readHeaderImages() {
+		// Spotify also assigns this class to the wrapper; select the image itself.
+		const image = document.querySelector(".Root__main-view img.main-entityHeader-image, .Root__main-view .main-entityHeader-image img");
+		// New artist pages put their native background directly in the scroll slot.
+		const headers = document.querySelectorAll(".Root__main-view .main-entityHeader-background, .Root__main-view .before-scroll-node > :not(.comfy-banner-frame), .Root__main-view .before-scroll-node > :not(.comfy-banner-frame) [style]");
+		return {
+			image: image?.currentSrc || image?.src,
+			background: Array.from(headers, header => getComputedStyle(header).backgroundImage.match(/^url\(["']?(.*?)["']?\)$/)?.[1]).find(Boolean)
+		};
+	}
+	function mountBanner() {
+		const container = document.querySelector(".Root__main-view .before-scroll-node");
+		if (container && frame.parentElement !== container) container.appendChild(frame);
+	}
+	// Spotify replaces the scroll container on navigation, even after History fires.
+	waitForDeps(".Root__top-container", main => {
+		mountBanner();
+		new MutationObserver(() => {
+			mountBanner();
+			// Album/artist artwork can arrive after History. Re-resolve only when
+			// those images change, not for every playback or banner style update.
+			const header = readHeaderImages();
+			if (header.image !== lastHeaderImage || header.background !== lastHeaderBackground) {
+				lastHeaderImage = header.image;
+				lastHeaderBackground = header.background;
+				if (getConfig("Prefer-Existing-Image") || getConfig("AM-Gradient-Include-Existing-Snippet")) updateBanner();
+			}
+		}).observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "style"] });
+	}, true);
+	waitForDeps("Spicetify.Platform.History", history => history.listen(updateBanner));
+	waitForDeps("Spicetify.Player", player => player.addEventListener("songchange", updateBanner));
 	updateBanner();
 
 	// React components
@@ -133,19 +164,19 @@
 		const [state, setState] = Spicetify.React.useState(true);
 		const self = document.querySelector(".ReactModalPortal:last-of-type");
 		const ConfirmDialog = Spicetify.ReactComponent.ConfirmDialog;
-		const isForwardRef = typeof ConfirmDialog === "function";
+
 		const commonProps = {
 			...props,
 			isOpen: state,
 			onClose: () => {
 				setState(false);
 				props.onClose?.();
-				self.remove();
+				self?.remove();
 			},
 			onConfirm: () => {
 				setState(false);
 				props.onConfirm?.();
-				self.remove();
+				self?.remove();
 			}
 		};
 
@@ -155,7 +186,7 @@
 			}
 		}, [state]);
 
-		return isForwardRef ? ConfirmDialog(commonProps) : Spicetify.React.createElement(ConfirmDialog, commonProps);
+		return Spicetify.React.createElement(ConfirmDialog, commonProps);
 	});
 
 	const Section = ({ name, children, condition = true, filter }) => {
@@ -175,6 +206,7 @@
 					children.map(child =>
 						Spicetify.React.createElement(child.type, {
 							...child,
+							key: child.name,
 							tippy: Spicetify.React.createElement(Tippy, { label: child.tippy })
 						})
 					)
@@ -193,6 +225,7 @@
 				items.map(item =>
 					Spicetify.React.createElement(item.type, {
 						...item,
+						key: item.name,
 						tippy: Spicetify.React.createElement(Tippy, { label: item.tippy })
 					})
 				)
@@ -292,6 +325,7 @@
 					items.map(item =>
 						Spicetify.React.createElement(item.type, {
 							...item,
+						key: item.name,
 							tippy: Spicetify.React.createElement(Tippy, { label: item.tippy })
 						})
 					)
@@ -323,7 +357,7 @@
 							role: "img",
 							height: "16",
 							width: "16",
-							tabindex: "0",
+							tabIndex: "0",
 							className: "Svg-sc-ytk21e-0 Svg-img-icon x-settings-tooltipIcon",
 							viewBox: "0 0 16 16"
 						},
@@ -392,7 +426,7 @@
 	const Input = Spicetify.React.memo(
 		({ inputType, includePicker, name, title, desc, min, max, step, tippy, defaultVal, condition = true, callback, callbackOverride }) => {
 			const [value, setValue] = Spicetify.React.useState(getConfig(name) ?? "");
-			const [defaultState, setDefaultState] = Spicetify.React.useState(defaultVal);
+			const [defaultState, setDefaultState] = Spicetify.React.useState(isPromise(defaultVal) ? "" : defaultVal);
 			const isFirstRender = Spicetify.React.useRef(true);
 			const textFieldRef = Spicetify.React.useRef(null);
 
@@ -407,7 +441,13 @@
 			}, []);
 
 			Spicetify.React.useEffect(() => {
-				if (isPromise(defaultVal)) defaultVal.then(val => setDefaultState(val));
+				let active = true;
+				if (isPromise(defaultVal)) {
+					Promise.resolve(defaultVal).then(val => {
+						if (active) setDefaultState(val ?? "");
+					}).catch(error => console.warn("[Comfy-Warning]: Setting placeholder unavailable", name, error));
+				}
+				return () => { active = false; };
 			}, [defaultVal]);
 
 			Spicetify.React.useEffect(() => {
@@ -917,16 +957,7 @@
 					defaultVal: Spicetify.Platform.version >= "1.2.46.462" ? "64" : "40",
 					min: "0",
 					condition: Spicetify.Platform.version >= "1.2.32.997",
-					callback: (value, name, defaultVal) => {
-						waitForDeps(["Spicetify.CosmosAsync"], async () => {
-							await Spicetify.CosmosAsync.post("sp://messages/v1/container/control", {
-								type: "update_titlebar",
-								height: `${(value === "0" ? "1" : value) || defaultVal}px`
-							});
-
-							document.documentElement.style.setProperty("--comfy-topbar-height", value ? value + "px" : "");
-						});
-					},
+					callback: (value, name, defaultVal) => updateTitlebar(value, defaultVal),
 					callbackOverride: true
 				},
 				{
@@ -1610,28 +1641,23 @@
 					isLarge: true
 				});
 
-				document.querySelector(".main-trackCreditsModal-closeBtn[aria-label='Close']").addEventListener("click", function () {
-					document.getElementById("main").classList.remove("Settings-Open");
-				});
-
-				document.querySelector("generic-modal").addEventListener("click", event => {
-					if (event.target.className === "GenericModal__overlay") {
-						event.preventDefault();
-						document.getElementById("main").classList.remove("Settings-Open");
+				const modal = document.querySelector("generic-modal:has(.comfy-settings)");
+				if (!modal) return;
+				modal.classList.add("comfy-modal");
+				const cleanup = new MutationObserver(() => {
+					if (!modal.isConnected) {
+						document.getElementById("main")?.classList.remove("Settings-Open");
+						cleanup.disconnect();
 					}
 				});
-
-				// Scroll Position
-				const section = document.querySelector(".main-trackCreditsModal-mainSection");
-				const cache = sessionStorage.getItem("comfy-settings-scroll");
-				const scrollVal = cache ? cache * (section.scrollHeight - section.clientHeight) : 0;
-
-				section.scrollTo(null, scrollVal);
+				cleanup.observe(document.body, { childList: true });
+				const section = modal.querySelector(".main-trackCreditsModal-mainSection");
+				if (!section) return;
+				const cache = Number(sessionStorage.getItem("comfy-settings-scroll")) || 0;
+				section.scrollTop = Math.max(0, Math.min(1, cache)) * (section.scrollHeight - section.clientHeight);
 				section.addEventListener("scroll", () => {
-					const scrollTop = section.scrollTop;
-					const scrollHeight = section.scrollHeight - section.clientHeight;
-					const scrollPercentage = scrollTop / scrollHeight;
-					sessionStorage.setItem("comfy-settings-scroll", scrollPercentage);
+					const range = section.scrollHeight - section.clientHeight;
+					sessionStorage.setItem("comfy-settings-scroll", range > 0 ? section.scrollTop / range : 0);
 				});
 			},
 			false,
@@ -1658,7 +1684,7 @@
 	}
 
 	function isPromise(p) {
-		if (typeof p === "object" && typeof p.then === "function") {
+		if (p != null && typeof p.then === "function") {
 			return true;
 		}
 		return false;
@@ -1672,127 +1698,105 @@
 		}
 	}
 
+	function readDependency(expression) {
+		for (const path of expression.split("||")) {
+			const value = path.trim().split(".").reduce((object, key) => object?.[key], globalThis);
+			if (value) return value;
+		}
+	}
+
 	async function waitForDeps(dependencies, callback, element = false, elementType = "querySelector", timeout = 5000) {
-		return new Promise(resolve => {
-			let allDependenciesLoaded = false;
-			let startTime = Date.now();
-
-			async function checkElements() {
-				const check = () =>
-					Array.isArray(dependencies) ? dependencies.every(element => document[elementType](element)) : document[elementType](dependencies);
-				if (check()) {
-					callback?.(Array.isArray(dependencies) ? dependencies.map(d => document[elementType](d)) : document[elementType](dependencies));
-					resolve();
-				} else {
-					const observer = new MutationObserver(() => {
-						if (check()) {
-							observer.disconnect();
-							callback?.(Array.isArray(dependencies) ? dependencies.map(d => document[elementType](d)) : document[elementType](dependencies));
-							resolve();
-						}
-					});
-					observer.observe(document.documentElement, { childList: true, subtree: true });
+		const paths = Array.isArray(dependencies) ? dependencies : [dependencies];
+		const started = Date.now();
+		while (true) {
+			const values = paths.map(path => element ? document[elementType](path) : readDependency(path));
+			if (values.every(value => value && (!element || elementType !== "querySelectorAll" || value.length > 0))) {
+				try {
+					await callback?.(Array.isArray(dependencies) ? values : values[0]);
+					return true;
+				} catch (error) {
+					console.warn("[Comfy-Warning]: Feature could not be initialized", dependencies, error);
+					return false;
 				}
 			}
-
-			async function checkDependencies() {
-				for (const dependency of Array.isArray(dependencies) ? dependencies : [dependencies]) {
-					if (!eval(dependency)) {
-						if (Date.now() - startTime < timeout) {
-							setTimeout(checkDependencies, 10);
-						} else {
-							console.error(`[Comfy-Error]: Dependency Timeout -`, dependencies);
-							resolve();
-						}
-						return;
-					}
-				}
-
-				if (!allDependenciesLoaded) {
-					allDependenciesLoaded = true;
-
-					callback?.(Array.isArray(dependencies) ? dependencies.map(d => eval(d)) : eval(dependencies));
-
-					resolve();
-				}
+			if (Date.now() - started >= timeout) {
+				console.warn("[Comfy-Warning]: Dependency unavailable", dependencies);
+				return false;
 			}
+			await new Promise(resolve => setTimeout(resolve, 100));
+		}
+	}
 
-			element ? checkElements() : checkDependencies();
-		});
+	async function updateTitlebar(value, defaultVal) {
+		const height = Number(value || defaultVal);
+		if (!Number.isFinite(height) || height < 0) return;
+		document.documentElement.style.setProperty("--comfy-topbar-height", value ? `${height}px` : "");
+		// The native container/control resolver is absent on Spotify 1.2.98 for macOS.
+		if (document.documentElement.classList.contains("spotify__os--is-macos")) return;
+		await waitForDeps("Spicetify.CosmosAsync", cosmos => cosmos.post("sp://messages/v1/container/control", {
+			type: "update_titlebar", height: `${height || 1}px`
+		}));
+	}
+
+	function normalizeImage(source) {
+		if (typeof source !== "string" || !source) return null;
+		return source.startsWith("spotify:image:") ? `https://i.scdn.co/image/${source.slice(14)}` : source;
 	}
 
 	async function updateBanner() {
-		await waitForDeps(["Spicetify.Player.data", "Spicetify.Platform.History.location"]);
-
+		const revision = ++bannerRevision;
+		if (!await waitForDeps("Spicetify.Platform.History.location")) return;
 		const pathname = Spicetify.Platform.History.location.pathname;
+		mountBanner();
 		let source;
-
-		if (getConfig("Apple-Music-Gradient-Snippet") && getConfig("AM-Gradient-Include-Existing-Snippet")) {
-			const [isPlaylist, isArtist] = [Spicetify.URI.isPlaylistV1OrV2(pathname), Spicetify.URI.isArtist(pathname)];
-
-			if (isPlaylist || isArtist) {
-				const id = pathname.match(/\/(?:playlist|artist)\/([^/]+)/)[1];
-				const uri = `spotify:${isPlaylist ? "playlist" : "artist"}:${id}`;
-				const metadata = isPlaylist
-					? await Spicetify.Platform.PlaylistAPI.getMetadata(uri)
-					: await Spicetify.GraphQL.Request(
-							{
-								name: "queryArtistOverview",
-								operation: "query",
-								sha256Hash: "35648a112beb1794e39ab931365f6ae4a8d45e65396d641eeda94e4003d41497",
-								value: null
-							},
-							{
-								uri: uri,
-								includePrerelease: true,
-								locale: null
-							}
-					  );
-				source = isPlaylist ? metadata.images[3]?.url : metadata.data.artistUnion.visuals.headerImage?.sources?.[0]?.url;
+		try {
+			const isPlaylist = /^\/playlist\//.test(pathname);
+			const isAlbum = /^\/album\//.test(pathname);
+			const isArtist = /^\/artist\//.test(pathname);
+			if (getConfig("Apple-Music-Gradient-Snippet") && getConfig("AM-Gradient-Include-Existing-Snippet")) {
+				// Use the image already loaded by Spotify instead of a hard-coded GraphQL hash.
+				if (isArtist) source = readHeaderImages().background;
+				if (isPlaylist) {
+					const playlist = await Spicetify.Platform.PlaylistAPI.getMetadata(`spotify:playlist:${pathname.split("/")[2]}`);
+					source = playlist?.images?.[3]?.url || readHeaderImages().background;
+				}
 			}
-		}
-
-		if (!source && getConfig("Custom-Image")) {
-			source = getConfig("Custom-Image-URL")?.replace(/"/g, "");
-		}
-
-		if (!source && getConfig("Prefer-Existing-Image")) {
-			if (Spicetify.URI.isPlaylistV1OrV2(pathname)) {
-				const uri = `spotify:playlist:${pathname.split("/").pop()}`;
-				const playlist = await Spicetify.Platform.PlaylistAPI.getMetadata(uri);
-				source = playlist.images[0]?.url;
-			} else if (Spicetify.URI.isAlbum(pathname)) {
-				await waitForDeps("Spicetify.CosmosAsync");
-				const album = await Spicetify.CosmosAsync.get(`https://api.spotify.com/v1/albums/${pathname.split("/").pop()}`);
-				source = album.images[0]?.url;
+			if (!source && getConfig("Custom-Image")) source = getConfig("Custom-Image-URL")?.trim();
+			if (!source && getConfig("Prefer-Existing-Image")) {
+				if (isPlaylist) {
+					const playlist = await Spicetify.Platform.PlaylistAPI.getMetadata(`spotify:playlist:${pathname.split("/")[2]}`);
+					source = playlist?.images?.[0]?.url;
+				} else if (isAlbum) {
+					// Avoid the public Web API's restricted album endpoint.
+					source = readHeaderImages().image;
+				}
 			}
+		} catch (error) {
+			console.warn("[Comfy-Warning]: Banner metadata unavailable; using current cover", error);
 		}
-
-		source = source ?? Spicetify.Player.data.item?.metadata?.image_xlarge_url ?? Spicetify.Player.data.track.metadata.image_xlarge_url;
-
+		if (revision !== bannerRevision) return;
+		const data = Spicetify.Player?.data;
+		source = normalizeImage(source || data?.item?.metadata?.image_xlarge_url || data?.track?.metadata?.image_xlarge_url);
 		const validChannel = Object.values(channels).some(channel => channel.enabled && channel.regex.test(pathname));
 		frame.style.display = validChannel ? "" : "none";
-		if (getConfig("Banner-Enabled")) {
-			if (!validChannel) {
-				document.getElementById("main").classList.remove("Banner-Enabled");
-			} else {
-				document.getElementById("main").classList.add("Banner-Enabled");
-			}
+		document.getElementById("main")?.classList.toggle("Banner-Enabled", Boolean(getConfig("Banner-Enabled") && validChannel));
+		banner.forEach(image => { image.style.display = source ? "" : "none"; });
+		const rootStyle = document.documentElement.style;
+		if (!source) {
+			rootStyle.setProperty("--image-url", "none");
+			return;
 		}
-
-		if (document.documentElement.style.getPropertyValue("--image-url") !== `url(${source})`) {
-			console.debug(`[Comfy-Event]: Banner Source = ${source}`);
-
+		const cssImage = `url(${JSON.stringify(source)})`;
+		if (rootStyle.getPropertyValue("--image-url") !== cssImage) {
 			const preloadImage = new Image();
-			preloadImage.onload = function () {
-				document.documentElement.style.setProperty("--image-url", `url(${source})`);
+			preloadImage.onload = () => {
+				if (revision === bannerRevision) rootStyle.setProperty("--image-url", cssImage);
+			};
+			preloadImage.onerror = () => {
+				if (revision === bannerRevision) rootStyle.setProperty("--image-url", "none");
 			};
 			preloadImage.src = source;
 		}
-
-		banner.forEach(image => {
-			image.style.display = source ? "" : "none";
-		});
 	}
 
 })();

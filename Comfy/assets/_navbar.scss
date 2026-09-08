@@ -1,4 +1,9 @@
 :root .Root__nav-bar {
+	// The library hover/selection background is an Encore row, not a button.
+	.main-yourLibraryX-listItem [data-encore-id="listRow"] {
+		border-radius: var(--border-radius) !important;
+	}
+
 	.main-rootlist-wrapper {
 		div:nth-child(2) {
 			>li {

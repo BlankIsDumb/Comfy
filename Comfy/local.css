@@ -1,0 +1,3 @@
+:root * {
+    font-family: var(--font-family, "Nunito", "Zen Kaku Gothic Antique Medium", "SOV_monomon", var(--fallback-fonts, sans-serif), sans-serif) !important;
+}
