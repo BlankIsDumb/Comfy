@@ -1,4 +1,14 @@
 :root .Root__top-container {
+	// Right-sidebar media cards use separate radii for the hover shell, media
+	// clip, and play overlay. Keep every visible layer on the theme radius.
+	.Root__right-sidebar [data-encore-id="card"] {
+		&,
+		&::after,
+		>div:has(>img.main-image-image),
+		>div:has(>img.main-image-image)>div {
+			border-radius: var(--border-radius) !important;
+		}
+	}
 
 	// Cover-art
 	.main-nowPlayingWidget-nowPlaying {

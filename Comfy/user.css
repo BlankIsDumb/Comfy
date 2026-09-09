@@ -225,6 +225,11 @@
   line-clamp: 1 !important;
 }
 
+:root .Root__top-container .Root__right-sidebar [data-encore-id=card], :root .Root__top-container .Root__right-sidebar [data-encore-id=card]::after,
+:root .Root__top-container .Root__right-sidebar [data-encore-id=card] > div:has(> img.main-image-image),
+:root .Root__top-container .Root__right-sidebar [data-encore-id=card] > div:has(> img.main-image-image) > div {
+  border-radius: var(--border-radius) !important;
+}
 :root .Root__top-container .main-nowPlayingWidget-nowPlaying {
   height: 0;
   z-index: 1;
