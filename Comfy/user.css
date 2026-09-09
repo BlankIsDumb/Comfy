@@ -198,6 +198,9 @@
 :root .Root__nav-bar .main-yourLibraryX-listItem [data-encore-id=listRow] {
   border-radius: var(--border-radius) !important;
 }
+:root .Root__nav-bar .main-yourLibraryX-listItem [data-encore-id=listRow] .x-entityImage-imageContainer + div {
+  border-radius: var(--border-radius) !important;
+}
 :root .Root__nav-bar .main-rootlist-wrapper div:nth-child(2) > li .main-yourLibraryX-listRowEntityImage {
   border-radius: var(--border-radius) !important;
 }
