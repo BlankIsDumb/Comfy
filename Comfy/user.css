@@ -225,6 +225,9 @@
   line-clamp: 1 !important;
 }
 
+:root .Root__top-container .Root__right-sidebar .main-nowPlayingView-contextItemInfo::before {
+  background: none !important;
+}
 :root .Root__top-container .Root__right-sidebar [data-encore-id=card], :root .Root__top-container .Root__right-sidebar [data-encore-id=card]::after,
 :root .Root__top-container .Root__right-sidebar [data-encore-id=card] > div:has(> img.main-image-image),
 :root .Root__top-container .Root__right-sidebar [data-encore-id=card] > div:has(> img.main-image-image) > div {

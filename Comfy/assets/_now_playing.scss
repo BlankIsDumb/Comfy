@@ -1,4 +1,10 @@
 :root .Root__top-container {
+	// Spotify's Now Playing context fade assumes a black panel and becomes a
+	// visible band with colored or dynamic theme backgrounds.
+	.Root__right-sidebar .main-nowPlayingView-contextItemInfo::before {
+		background: none !important;
+	}
+
 	// Right-sidebar media cards use separate radii for the hover shell, media
 	// clip, and play overlay. Keep every visible layer on the theme radius.
 	.Root__right-sidebar [data-encore-id="card"] {
