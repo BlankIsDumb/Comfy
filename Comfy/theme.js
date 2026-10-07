@@ -282,6 +282,10 @@
 	}));
 	syncBannerRuntime();
 
+	// Own this feature independently of page banners: browsing another album must
+	// never change the artwork used by the Now Playing panel.
+	const nowPlayingArtwork = createNowPlayingArtwork();
+
 	// React components
 	const Dialog = Spicetify.React.memo(props => {
 		const [state, setState] = Spicetify.React.useState(true);
@@ -965,6 +969,7 @@
 					{ label: "Settings" },
 					{ label: "Banner Image" },
 					{ label: "Cover Art" },
+					{ label: "Now Playing" },
 					{ label: "Playbar" },
 					{ label: "Tracklist" },
 					{ label: "Interface" },
@@ -973,6 +978,33 @@
 				checked: filter,
 				setChecked: setFilter
 			}),
+			Spicetify.React.createElement(Section, { name: "Now Playing", filter }, [
+				{
+					type: Toggle, name: "NPV-Artwork-Enabled", title: "Album Art Background",
+					desc: "A static, processed cover behind Now Playing. Updates after a 500 ms pause between skips.",
+					defaultVal: false, callback: () => nowPlayingArtwork.configure()
+				},
+				...[
+					["Blur", "Background Blur", "Blur in pixels at the fixed 512-pixel working size.", 32, 0, 80],
+					["Brightness", "Background Brightness", "Percent brightness before automatic contrast protection.", 65, 0, 150],
+					["Saturation", "Background Saturation", "Percent saturation; 0 is grayscale and 100 is unchanged.", 110, 0, 200],
+					["Card-Darkening", "Section Card Darkening", "Darkens Artist, Credits, On Tour, Merch, Queue, and Related Music Videos cards while preserving their outlines.", 45, 0, 95]
+				].map(([key, title, desc, defaultVal, min, max]) => ({
+					type: Input, inputType: "number", name: `NPV-Artwork-${key}`,
+					title, desc, defaultVal, min, max, step: 1,
+					callback: () => nowPlayingArtwork.configure()
+				})),
+				{
+					type: Toggle, name: "NPV-Artwork-Auto-Contrast", title: "Protect Background Text Contrast",
+					desc: "Further darkens or lightens bright/dark artwork for the theme's text colors. May limit the brightness setting.",
+					defaultVal: true, callback: () => nowPlayingArtwork.configure()
+				},
+				{
+					type: Toggle, name: "NPV-Artwork-Fade", title: "Fade Between Covers",
+					desc: "A short fade while Spotify is focused. Respects reduced motion.",
+					defaultVal: true, callback: () => nowPlayingArtwork.configure()
+				}
+			]),
 			Spicetify.React.createElement(Section, { name: "Colors", filter }, [
 				{
 					type: Dropdown,
@@ -1861,6 +1893,302 @@
 		await waitForDeps("Spicetify.CosmosAsync", cosmos => cosmos.post("sp://messages/v1/container/control", {
 			type: "update_titlebar", height: `${height || 1}px`
 		}));
+	}
+
+	function createNowPlayingArtwork() {
+		const hostSelector = ".Root__right-sidebar .NowPlayingView";
+		const shellSelector = ".Root__right-sidebar, .Root__right-sidebar-peek, .Root__right-sidebar-overlayWrapper, .Root__right-sidebar-peekContent, .main-nowPlayingView-container";
+		let enabled = false, player, root, host, observer, options;
+		let revision = 0, pendingKey = "", renderedKey = "";
+		let delayTimer, readyTimer, loadTimer, fadeTimer, loadingImage, current, outgoing, animation;
+		let suspended = true;
+
+		function numberSetting(key, fallback, min, max) {
+			const raw = getConfig(`NPV-Artwork-${key}`);
+			const value = raw === "" || raw == null ? fallback : Number(raw);
+			return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+		}
+
+		function readOptions() {
+			return {
+				blur: numberSetting("Blur", 32, 0, 80),
+				brightness: numberSetting("Brightness", 65, 0, 150),
+				saturation: numberSetting("Saturation", 110, 0, 200),
+				card: numberSetting("Card-Darkening", 45, 0, 95),
+				contrast: getConfig("NPV-Artwork-Auto-Contrast") ?? true,
+				fade: getConfig("NPV-Artwork-Fade") ?? true
+			};
+		}
+
+		function readSource() {
+			// Use player artwork directly; do not fetch album metadata or borrow the
+			// page banner. A local track can still provide a usable ordinary image URL.
+			const data = player?.data;
+			const metadata = data?.item?.metadata || data?.track?.metadata;
+			const source = normalizeImage(metadata?.image_large_url || metadata?.image_xlarge_url ||
+				metadata?.image_url || metadata?.image_small_url);
+			// Spotify's native local-cover scheme rejects our CORS image request.
+			// Skip it before allocating a loader, restoring the normal theme without
+			// console errors. Check the scheme, not OS-specific paths; removing CORS
+			// is not a substitute for the readable pixels auto-contrast requires.
+			return source?.startsWith("spotify:localfileimage:") ? null : source;
+		}
+
+		function release(canvas) {
+			if (!canvas) return;
+			canvas.remove();
+			// Release the pixel backing store as well as the detached DOM node.
+			canvas.width = canvas.height = 0;
+		}
+
+		function finishFade() {
+			clearTimeout(fadeTimer);
+			fadeTimer = undefined;
+			if (animation) {
+				animation.onfinish = null;
+				animation.cancel();
+				animation = undefined;
+			}
+			release(outgoing);
+			outgoing = undefined;
+		}
+
+		function cancelPending() {
+			++revision;
+			clearTimeout(delayTimer);
+			clearTimeout(loadTimer);
+			delayTimer = loadTimer = undefined;
+			pendingKey = "";
+			if (loadingImage) {
+				loadingImage.onload = loadingImage.onerror = null;
+				loadingImage.removeAttribute("src");
+				loadingImage = undefined;
+			}
+		}
+
+		function clearSurface() {
+			finishFade();
+			release(current);
+			current = undefined;
+			renderedKey = "";
+			host?.classList.remove("comfy-npv-artwork-active");
+		}
+
+		function canRender() {
+			return Boolean(host?.isConnected && !document.hidden &&
+				!root?.hasAttribute("data-right-sidebar-hidden") &&
+				!host.closest('[aria-hidden="true"], .Root__right-sidebar-collapsed'));
+		}
+
+		function applyCardSurface() {
+			// Scoped to this host; changing card opacity needs no canvas processing.
+			host?.style.setProperty("--comfy-npv-card-darkening", String(options.card / 100));
+		}
+
+		function syncPanel() {
+			if (!enabled || !root) return;
+			const nextHost = root.querySelector(hostSelector);
+			if (nextHost !== host) {
+				cancelPending();
+				clearSurface();
+				host?.style.removeProperty("--comfy-npv-card-darkening");
+				host = nextHost;
+				suspended = true;
+				applyCardSurface();
+			}
+			// Observe direct children of the panel's shells only. Track text, cover
+			// animations, scroll positions and our canvases are never observed.
+			// Rebind when React replaces a shell, including while the panel is closed.
+			observer.disconnect();
+			observer.observe(root, { childList: true, attributes: true, attributeFilter: ["data-right-sidebar-hidden"] });
+			for (const shell of root.querySelectorAll(shellSelector)) {
+				const attributes = shell.matches(".Root__right-sidebar-peek, .Root__right-sidebar-peekContent");
+				observer.observe(shell, attributes
+					? { childList: true, attributes: true, attributeFilter: ["class", "aria-hidden"] }
+					: { childList: true });
+			}
+			updateVisibility();
+		}
+
+		function updateVisibility() {
+			if (!enabled) return;
+			if (!canRender()) {
+				suspended = true;
+				cancelPending();
+				finishFade();
+				return;
+			}
+			const wasSuspended = suspended;
+			suspended = false;
+			requestArtwork(wasSuspended);
+		}
+
+		function onBlur() { finishFade(); }
+		function onSongChange() { requestArtwork(false); }
+
+		function requestArtwork(skipFade) {
+			if (!enabled || !canRender()) { cancelPending(); return; }
+			const source = readSource();
+			if (!source) { cancelPending(); clearSurface(); return; }
+			const key = JSON.stringify([source, options.blur, options.brightness, options.saturation, options.contrast]);
+			// A single equality check avoids needless work for another track from the
+			// same album. No multi-cover cache or URI bookkeeping is needed.
+			if (key === renderedKey) { cancelPending(); return; }
+			if (key === pendingKey) return;
+			cancelPending();
+			pendingKey = key;
+			const job = revision;
+			// Trailing debounce: rapid skips and number-field edits process only the
+			// latest request. No interval, resize handler or playback-progress listener.
+			delayTimer = setTimeout(() => {
+				delayTimer = undefined;
+				if (job !== revision || !canRender()) return;
+				const image = new Image();
+				loadingImage = image;
+				const fail = () => {
+					if (job !== revision) return;
+					cancelPending();
+					clearSurface();
+				};
+				image.crossOrigin = "anonymous";
+				image.onerror = fail;
+				loadTimer = setTimeout(fail, 10000);
+				image.onload = () => {
+					if (job !== revision || !canRender()) return;
+					clearTimeout(loadTimer);
+					loadTimer = undefined;
+					image.onload = image.onerror = null;
+					loadingImage = undefined;
+					let canvas;
+					try {
+						canvas = renderNowPlayingArtwork(image, options);
+						if (job !== revision || !canRender()) { release(canvas); return; }
+						finishFade();
+						outgoing = current;
+						current = canvas;
+						canvas.className = "comfy-npv-artwork-layer";
+						canvas.setAttribute("aria-hidden", "true");
+						host.appendChild(canvas);
+						host.classList.add("comfy-npv-artwork-active");
+						renderedKey = key;
+						pendingKey = "";
+						if (!skipFade && options.fade && document.hasFocus() &&
+							!window.matchMedia("(prefers-reduced-motion: reduce)").matches && canvas.animate) {
+							animation = canvas.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, easing: "ease-out" });
+							animation.onfinish = finishFade;
+							// Bound cleanup even if the renderer suppresses a completion event.
+							fadeTimer = setTimeout(finishFade, 400);
+						} else finishFade();
+					} catch (error) {
+						release(canvas);
+						fail();
+						console.warn("[Comfy-Warning]: Now Playing artwork unavailable", error);
+					}
+				};
+				image.src = source;
+			}, 500);
+		}
+
+		function attach(attempt = 0) {
+			readyTimer = undefined;
+			if (!enabled) return;
+			player = Spicetify.Player;
+			root = document.querySelector(".Root__top-container");
+			if (!player?.addEventListener || !player?.removeEventListener || !root) {
+				// Startup only, cancellable and bounded like the theme's other waits.
+				if (attempt < 50) readyTimer = setTimeout(() => attach(attempt + 1), 100);
+				return;
+			}
+			player.addEventListener("songchange", onSongChange);
+			document.addEventListener("visibilitychange", updateVisibility);
+			window.addEventListener("blur", onBlur);
+			observer = new MutationObserver(syncPanel);
+			syncPanel();
+		}
+
+		function disable() {
+			enabled = false;
+			clearTimeout(readyTimer);
+			readyTimer = undefined;
+			cancelPending();
+			observer?.disconnect();
+			observer = undefined;
+			player?.removeEventListener?.("songchange", onSongChange);
+			document.removeEventListener("visibilitychange", updateVisibility);
+			window.removeEventListener("blur", onBlur);
+			clearSurface();
+			host?.style.removeProperty("--comfy-npv-card-darkening");
+			host = root = player = undefined;
+			suspended = true;
+		}
+
+		return {
+			configure() {
+				options = readOptions();
+				if (!getConfig("NPV-Artwork-Enabled")) { if (enabled) disable(); return; }
+				if (!enabled) { enabled = true; attach(); return; }
+				applyCardSurface();
+				if (!options.fade) finishFade();
+				requestArtwork(false);
+			}
+		};
+	}
+
+	function renderNowPlayingArtwork(image, options) {
+		// 512 retains detail at low blur without a full-resolution panel buffer.
+		// The canvas itself is the cached texture: no data URL, Blob URL or live CSS
+		// filter. Window resizing only scales/crops this already-processed bitmap.
+		const size = 512;
+		const canvas = document.createElement("canvas");
+		const sample = document.createElement("canvas");
+		canvas.width = canvas.height = size;
+		sample.width = sample.height = 32;
+		try {
+			const context = canvas.getContext("2d");
+			if (!context || !("filter" in context)) throw new Error("Canvas filters unavailable");
+			const padding = Math.ceil(options.blur * 3);
+			const scale = Math.max((size + padding * 2) / image.naturalWidth, (size + padding * 2) / image.naturalHeight);
+			const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
+			context.filter = `blur(${options.blur}px) brightness(${options.brightness}%) saturate(${options.saturation}%)`;
+			// Overscan prevents blur sampling transparent pixels at the texture edges.
+			context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
+			context.filter = "none";
+			if (options.contrast) {
+				const probe = sample.getContext("2d", { willReadFrequently: true });
+				probe.drawImage(canvas, 0, 0, 32, 32);
+				const pixels = probe.getImageData(0, 0, 32, 32).data;
+				const luminance = (r, g, b) => [r, g, b].reduce((sum, value, i) => {
+					const s = value / 255;
+					return sum + (s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4) * [0.2126, 0.7152, 0.0722][i];
+				}, 0);
+				// Active artwork uses white text, with secondary text at 80% opacity
+				// (see _now_playing.scss). Test that weaker foreground after compositing
+				// it over each background sample, rather than using the INI palette.
+				const textOpacity = 0.8;
+				// Protect against bright patches, not just average cover brightness.
+				// One small readback per cover; this is never called while resizing.
+				let alpha = 0;
+				for (let i = 0; i < pixels.length; i += 4) {
+					while (alpha < 0.95) {
+						const r = pixels[i] * (1 - alpha), g = pixels[i + 1] * (1 - alpha), b = pixels[i + 2] * (1 - alpha);
+						const foreground = value => 255 * textOpacity + value * (1 - textOpacity);
+						const contrast = (luminance(foreground(r), foreground(g), foreground(b)) + 0.05) / (luminance(r, g, b) + 0.05);
+						if (contrast >= 4.5) break;
+						alpha += 0.025;
+					}
+				}
+				context.fillStyle = "#000000";
+				context.globalAlpha = Math.min(alpha, 1);
+				context.fillRect(0, 0, size, size);
+				context.globalAlpha = 1;
+			}
+			return canvas;
+		} catch (error) {
+			canvas.width = canvas.height = 0;
+			throw error;
+		} finally {
+			sample.width = sample.height = 0;
+		}
 	}
 
 	function normalizeImage(source) {

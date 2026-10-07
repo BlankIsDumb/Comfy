@@ -1,8 +1,10 @@
-const { test } = require('node:test');
+const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../Comfy/theme.js'), 'utf8');
+const activeFixtures = [];
+afterEach(() => { for (const f of activeFixtures.splice(0)) f.api.stopBannerWatch(); });
 
 // Execute the production runtime. React's settings rendering is stubbed; these
 // tests exercise lifecycle, API failures and artwork races, not Spotify markup.
@@ -13,7 +15,11 @@ async function fixture(config = {}) {
   const warnings = [];
   const style = () => ({ values: {}, setProperty(k, v) { this.values[k] = v; }, getPropertyValue(k) { return this.values[k] || ''; } });
   const element = () => ({
-    style: style(), children: [], className: '', parentElement: null,
+    style: style(), children: [], className: '', parentElement: null, nodeType: 1,
+    selectors: new Map(), querySelector(s) { return this.selectors.get(s) || null; },
+    matches(s) { return s.split(',').some(part => part.trim() === `.${this.className}`); },
+    closest() { return null; },
+    remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(e => e !== this); this.parentElement = null; },
     classList: { values: new Set(), add(v) { this.values.add(v); }, contains(v) { return this.values.has(v); }, toggle(v, on) { on ? this.values.add(v) : this.values.delete(v); }, remove(v) { this.values.delete(v); } },
     append(e) { this.appendChild(e); },
     appendChild(e) { e.parentElement = this; this.children.push(e); },
@@ -22,17 +28,19 @@ async function fixture(config = {}) {
   const root = element(); root.classList.add('spotify__os--is-macos');
   const main = element();
   for (const selector of ['.Root__top-container', '.Root__main-view', '.Root__main-view .before-scroll-node', ':root .global-nav']) nodes.set(selector, element());
+  nodes.get('.Root__main-view').selectors.set('.before-scroll-node', nodes.get('.Root__main-view .before-scroll-node'));
   const history = { location: { pathname: '/collection/tracks' }, listen(fn) { this.listener = fn; } };
   const player = { data: {}, addEventListener(type, fn) { this.listener = fn; } };
   const store = new Map([['comfy:config', JSON.stringify(config)]]);
   const context = vm.createContext({
     console: { debug() {}, log() {}, warn(...args) { warnings.push(args); } },
-    setTimeout, clearTimeout, Date, URL,
+    setTimeout, clearTimeout, Date, URL, Node: { ELEMENT_NODE: 1 },
+    requestAnimationFrame: fn => setTimeout(fn, 0), cancelAnimationFrame: clearTimeout,
     document: { documentElement: root, createElement: element, querySelector: s => nodes.get(s) || null, querySelectorAll: s => nodes.get(s) || [], getElementById: id => id === 'main' ? main : null },
     localStorage: { getItem: k => store.get(k) || null, setItem: (k,v) => store.set(k,v), removeItem: k => store.delete(k) },
     getComputedStyle: e => ({ getPropertyValue: k => e.style.getPropertyValue(k), backgroundImage: e.backgroundImage || 'none' }),
     ResizeObserver: class { observe() {} },
-    MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} },
+    MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} disconnect() {} },
     Image: class { constructor() { images.push(this); } },
     Spicetify: {
       React: { memo: f => f, createElement: () => ({}) },
@@ -43,10 +51,12 @@ async function fixture(config = {}) {
   });
   context.window = context; context.outerWidth = context.innerWidth = 1000; context.addEventListener = () => {};
   // Expose private functions only inside this isolated test VM.
-  const injected = source.replace(/\n\}\)\(\);\s*$/, '\n globalThis.testAPI = {waitForDeps, readDependency, updateBanner, updateTitlebar, normalizeImage, frame, mountBanner};\n})();');
+  const injected = source.replace(/\n\}\)\(\);\s*$/, '\n globalThis.testAPI = {waitForDeps, readDependency, updateBanner, updateTitlebar, normalizeImage, frame, mountBanner, stopBannerWatch};\n})();');
   await vm.runInContext(injected, context);
   await new Promise(resolve => setImmediate(resolve));
-  return { context, api: context.testAPI, nodes, observers, images, warnings, root, main, history, player, element, store };
+  const result = { context, api: context.testAPI, nodes, observers, images, warnings, root, main, history, player, element, store };
+  activeFixtures.push(result);
+  return result;
 }
 
 test('nested APIs may be missing and arrive after startup', async () => {
@@ -81,10 +91,14 @@ test('empty player data is safe and clears artwork', async () => {
 test('banner is reattached when Spotify replaces the scroll container', async () => {
   const f = await fixture();
   const replacement = f.element();
+  replacement.className = 'before-scroll-node';
   f.nodes.set('.Root__main-view .before-scroll-node', replacement);
-  f.observers.forEach(fn => fn());
+  const records = [{ type: 'childList', addedNodes: [replacement], removedNodes: [] }];
+  f.observers.forEach(fn => fn(records));
+  await new Promise(r => setTimeout(r, 0));
   assert.equal(f.api.frame.parentElement, replacement);
-  f.observers.forEach(fn => fn());
+  f.observers.forEach(fn => fn(records));
+  await new Promise(r => setTimeout(r, 0));
   assert.equal(replacement.children.length, 1);
 });
 
@@ -122,8 +136,9 @@ test('slow metadata cannot replace the image for a newer route', async () => {
   await f.api.updateBanner();
   resolve({ images: [{ url: 'https://example.com/old.jpg' }] });
   await pending;
-  assert.equal(f.images.length, 1);
-  assert.equal(f.images[0].src, 'https://example.com/current.jpg');
+  // Home is not a banner channel; neither the late playlist nor current cover
+  // should start loading after navigating there.
+  assert.equal(f.images.length, 0);
   assert.equal(f.main.classList.contains('Banner-Enabled'), false);
 });
 
@@ -141,14 +156,16 @@ test('album artwork arriving after navigation replaces the fallback without an o
   const f = await fixture({ 'Prefer-Existing-Image': true });
   f.history.location.pathname = '/album/example';
   await f.api.updateBanner();
-  f.nodes.set('.Root__main-view .main-entityHeader-image', {}); // The wrapper shares the image class.
-  f.nodes.set('.Root__main-view img.main-entityHeader-image, .Root__main-view .main-entityHeader-image img', { src: 'https://example.com/album.jpg' });
-  f.observers.forEach(fn => fn());
-  await new Promise(r => setImmediate(r));
+  const image = f.element(); image.src = 'https://example.com/album.jpg';
+  image.matches = selector => selector.includes('img.main-entityHeader-image');
+  f.nodes.get('.Root__main-view').selectors.set('img.main-entityHeader-image, .main-entityHeader-image img', image);
+  const records = [{ type: 'attributes', attributeName: 'src', target: image }];
+  f.observers.forEach(fn => fn(records));
+  await new Promise(r => setTimeout(r, 0));
   assert.equal(f.images.at(-1).src, 'https://example.com/album.jpg');
   const count = f.images.length;
-  f.observers.forEach(fn => fn());
-  await new Promise(r => setImmediate(r));
+  f.observers.forEach(fn => fn(records));
+  await new Promise(r => setTimeout(r, 0));
   assert.equal(f.images.length, count);
 });
 
@@ -163,9 +180,8 @@ test('gradient mode retains the playlist banner supplied by metadata', async () 
 test('artist gradient uses the native scroll-slot background when legacy header classes are absent', async () => {
   const f = await fixture({ 'Apple-Music-Gradient-Snippet': true, 'AM-Gradient-Include-Existing-Snippet': true });
   f.history.location.pathname = '/artist/example';
-  f.nodes.set('.Root__main-view .main-entityHeader-background, .Root__main-view .before-scroll-node > :not(.comfy-banner-frame), .Root__main-view .before-scroll-node > :not(.comfy-banner-frame) [style]', [
-    { backgroundImage: 'none' }, { backgroundImage: 'url("https://example.com/artist.jpg")' }
-  ]);
+  const background = f.element(); background.backgroundImage = 'url("https://example.com/artist.jpg")';
+  f.nodes.get('.Root__main-view .before-scroll-node').appendChild(background);
   await f.api.updateBanner();
   assert.equal(f.images.at(-1).src, 'https://example.com/artist.jpg');
 });

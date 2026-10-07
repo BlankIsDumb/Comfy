@@ -1,4 +1,71 @@
 :root .Root__top-container {
+	// The panel already isolates its background pseudo-element. Put the cached
+	// bitmap above that paint but below content, without changing scroll/layout.
+	.Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active {
+		isolation: isolate;
+
+		// Target typography, not every descendant or the theme's shared palette:
+		// icon-only controls, saved-state accents and card outlines keep their colors.
+		:is([data-encore-id="text"], [data-encore-id="cardTitle"],
+			[data-encore-id="listRowTitle"], [data-encore-id="listRowSubtitle"],
+			[data-encore-id="buttonSecondary"]:not(:has(svg)),
+			[data-encore-id="buttonTertiary"]:not(:has(svg))) {
+			color: #fff !important;
+
+			// Spotify gives some nested artist links their own theme color.
+			a { color: inherit !important; }
+		}
+
+		// Keep metadata quieter than titles. The carousel's artist text does not
+		// carry Spotify's subdued marker. Keep this 0.8 alpha in sync with the
+		// foreground used by renderNowPlayingArtwork's contrast calculation.
+		:is([data-encore-id="text"], [data-encore-id="listRowSubtitle"],
+			[data-encore-id="buttonTertiary"]:not(:has(svg))).encore-internal-color-text-subdued,
+		.search-searchCategory-contentArea [data-encore-id="text"] {
+			color: rgba(255, 255, 255, 0.8) !important;
+		}
+
+		> .comfy-npv-artwork-layer {
+			position: absolute;
+			inset: 0;
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			pointer-events: none;
+			z-index: -1;
+		}
+
+		// Change only the inspected section shells. Tour and Merch have hashed
+		// shell classes, so identify their specific content rather than translated
+		// headings. Keep borders, outlines, focus treatment and child artwork intact.
+		.main-nowPlayingView-aboutArtist,
+		.main-nowPlayingView-credits,
+		.main-nowPlayingView-queue,
+		.main-nowPlayingView-section:has(> div > .main-nowPlayingView-onTourItemGrid),
+		.main-nowPlayingView-section:has(> ul > li a[href^="https://shop.spotify.com/"]),
+		.main-nowPlayingView-section:has(> .search-searchCategory-contentArea) {
+			background-color: rgba(0, 0, 0, var(--comfy-npv-card-darkening, 0.45)) !important;
+		}
+
+		// Related music videos is the section with a direct carousel content area.
+		// Its header and media cards already add 8px inline padding. Remove the
+		// full-bleed negative margin and add the remaining inset to form a tile,
+		// leaving the carousel's own scrolling and focus/hover overlays unchanged.
+		.main-nowPlayingView-section:has(> .search-searchCategory-contentArea) {
+			margin-inline: 0;
+			padding: 16px 8px 8px;
+			border-radius: var(--border-radius);
+		}
+
+		// Spotify 1.2.99 also paints the single wrapper and the details block
+		// containing the direct artist link. Clear only those redundant fills so
+		// the shell's dark surface shows through. The photo and controls stay intact.
+		.main-nowPlayingView-aboutArtist > div:only-child,
+		.main-nowPlayingView-aboutArtist > div:only-child > div > div:has(> a[href^="/artist/"]) {
+			background-color: transparent !important;
+		}
+	}
+
 	// Spotify's Now Playing context fade assumes a black panel and becomes a
 	// visible band with colored or dynamic theme backgrounds.
 	.Root__right-sidebar .main-nowPlayingView-contextItemInfo::before {

@@ -1,5 +1,60 @@
 # Spotify 1.2.98 compatibility
 
+## Optional Now Playing artwork background (October 6, 2026)
+
+Verified on Windows with Spotify 1.2.99.317 and the tuyu scheme. The feature is
+disabled by default; it uses player `image_large_url`, then `image_xlarge_url`,
+`image_url`, or `image_small_url`, normalizing Spotify image URIs without an
+extra extension, album API request, or invented image-size URL.
+
+The current cover supplied a 640×640 source. A visual low-blur comparison showed
+less aliasing at a 512×512 working size than 128×128. Warm preliminary draw/readback
+trials were about 3–5 ms at 256 and 9–12 ms at 512; the first trial had a large
+initialization cost. Actual feature renders including contrast protection sampled
+about 16–20 ms. These are local observations, not a general CPU/GPU guarantee.
+Each retained 512×512 pixel buffer is 1 MiB before browser/compositor overhead;
+at most two feature canvases are retained during the 300 ms fade.
+
+Live checks covered metadata artwork, actual song changes, rapid skip requests,
+window resizing (same canvas, no new render), panel collapse/reopen, settings
+edits, disable restoration, and enabled startup after reload. Spotify sometimes
+delivered rapidly requested skips several seconds apart; the 500 ms debounce
+coalesces artwork events arriving within that interval, not all user requests
+regardless of when Spotify delivers them. Card darkening changed the fill without
+rerendering the texture. Existing card border/outline/radius values were preserved.
+Real-canvas probes checked zero brightness, grayscale, and contrast treatment of
+white/black covers with light/dark text.
+
+Artwork-backed typography now uses white primary text and 80%-opaque white metadata,
+scoped to Encore text/title/subtitle markers and text-only buttons. Icon controls,
+saved-state colors and section borders retain their original palette. Contrast
+processing uses the composited secondary white foreground instead of INI colors.
+Real-canvas white, black and red probes exceeded 4.5:1 for that foreground.
+
+Native `spotify:localfileimage:` covers produced CORS scheme errors in the Windows
+console. They are now skipped before creating an image loader, using the ordinary
+theme fallback. The check is independent of filesystem path syntax; Windows and
+macOS URI fixtures cover cleanup, cancellation and recovery to usable artwork.
+Actual macOS playback has not been tested. No native-file helper was introduced.
+
+All 22 Node tests pass. Deterministic lifecycle tests additionally cover tightly
+spaced events, stale image completions, missing/failed/timed-out artwork, hidden
+documents, reduced motion, and disable/re-enable cleanup. Existing banner fixtures
+were updated to supply mutation records and scoped DOM queries; production banner
+behavior was not changed. Test discovery now also works with Node 20 on Windows.
+
+The CSS intentionally targets the inspected `.NowPlayingView` structure and the
+Artist/Credits/Queue semantic classes, Tour item structure, Spotify shop links,
+and the Related Music Videos carousel shell. All six share the card-darkening
+setting; the carousel receives its own rounded tile without changing its scrolling.
+Spotify's alternate Now Playing experiments,
+macOS/Linux, and every light scheme have not been live-tested. Contrast sampling
+protects the background but is not an accessibility audit of all Spotify controls.
+Existing homeConfig startup and native titlebar resolver warnings remain outside
+this feature; a Spotify startup error recovered after reload during verification.
+
+## Earlier compatibility baseline
+
 Verified on macOS with Spotify **1.2.98.301.gfcaeba72** and Spicetify **2.44.0** on September 7, 2026. This does not establish compatibility with every Spotify experiment or with Windows/Linux.
 
 On September 8, Spotify updated to **1.2.99.317** and replaced its patched files. The same theme was reapplied successfully with `spicetify backup apply`. Its JavaScript and CSS match the working copy byte for byte. The runtime reports version 1.2.99.317 with Comfy initialized; the artist page, main layout and bounded settings dialog render. Temporary appearance test flags were restored and verified after reload. User testing identified the sidebar rounding issue fixed below, and publication was approved after that fix. The full live checklist below was performed on 1.2.98; it was not repeated in full on 1.2.99.

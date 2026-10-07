@@ -225,6 +225,52 @@
   line-clamp: 1 !important;
 }
 
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active {
+  isolation: isolate;
+}
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active :is([data-encore-id=text], [data-encore-id=cardTitle],
+[data-encore-id=listRowTitle], [data-encore-id=listRowSubtitle],
+[data-encore-id=buttonSecondary]:not(:has(svg)),
+[data-encore-id=buttonTertiary]:not(:has(svg))) {
+  color: #fff !important;
+}
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active :is([data-encore-id=text], [data-encore-id=cardTitle],
+[data-encore-id=listRowTitle], [data-encore-id=listRowSubtitle],
+[data-encore-id=buttonSecondary]:not(:has(svg)),
+[data-encore-id=buttonTertiary]:not(:has(svg))) a {
+  color: inherit !important;
+}
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active :is([data-encore-id=text], [data-encore-id=listRowSubtitle],
+[data-encore-id=buttonTertiary]:not(:has(svg))).encore-internal-color-text-subdued,
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .search-searchCategory-contentArea [data-encore-id=text] {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active > .comfy-npv-artwork-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  z-index: -1;
+}
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .main-nowPlayingView-aboutArtist,
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .main-nowPlayingView-credits,
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .main-nowPlayingView-queue,
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .main-nowPlayingView-section:has(> div > .main-nowPlayingView-onTourItemGrid),
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .main-nowPlayingView-section:has(> ul > li a[href^="https://shop.spotify.com/"]),
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .main-nowPlayingView-section:has(> .search-searchCategory-contentArea) {
+  background-color: rgba(0, 0, 0, var(--comfy-npv-card-darkening, 0.45)) !important;
+}
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .main-nowPlayingView-section:has(> .search-searchCategory-contentArea) {
+  margin-inline: 0;
+  padding: 16px 8px 8px;
+  border-radius: var(--border-radius);
+}
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .main-nowPlayingView-aboutArtist > div:only-child,
+:root .Root__top-container .Root__right-sidebar .NowPlayingView.comfy-npv-artwork-active .main-nowPlayingView-aboutArtist > div:only-child > div > div:has(> a[href^="/artist/"]) {
+  background-color: transparent !important;
+}
 :root .Root__top-container .Root__right-sidebar .main-nowPlayingView-contextItemInfo::before {
   background: none !important;
 }

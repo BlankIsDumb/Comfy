@@ -1,5 +1,25 @@
 ![banner](../images/banner.png)
 
+### Now Playing album-art background
+
+In **Comfy Settings → Now Playing**, enable **Album Art Background** (off by default).
+Blur, brightness, saturation, and section card darkening are adjustable.
+Defaults are 32 px blur, 65% brightness, 110% saturation, and 45% card darkening.
+Automatic contrast protection and the short fade can be disabled independently.
+While artwork is visible, primary text is white and secondary text is 80%-opaque
+white. Contrast protection can further limit brightness to keep that text readable.
+Disabling artwork or falling back to the normal background restores the theme's text colors.
+
+The cover comes directly from player metadata. After 500 ms without a different
+artwork request, Comfy renders a 512×512 texture once. Resizing only scales/crops
+that texture; there is no live blur filter or playback polling. Identical artwork
+is reused, hidden panels defer work, and disabling releases the feature's resources.
+Missing or failed artwork restores the normal background. Native local-file covers
+(`spotify:localfileimage:`) also fall back quietly because they cannot be loaded
+through the feature's CORS image request. Artist, Credits, On Tour,
+Merch, and Queue retain their outlines, shape, images and controls with darkened
+fills. Related Music Videos gets a matching rounded tile around its carousel.
+
 ### 🎨 Color Schemes
 
 #### Collection
